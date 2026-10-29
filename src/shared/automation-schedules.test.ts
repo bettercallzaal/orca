@@ -14,6 +14,7 @@ import {
   AUTOMATION_CRON_EXPRESSION_MAX_BYTES,
   getAutomationCronExpressionFields,
   isValidAutomationCronSchedule,
+  isRunnableAutomationSchedule,
   isValidAutomationSchedule,
   parseAutomationRrule,
   tryParseAutomationRrule
@@ -103,6 +104,26 @@ describe('automation schedules', () => {
         new Date('2026-05-02T00:00:00').getTime()
       )
     ).toThrow('Invalid recurrence day.')
+  })
+
+  it.each([
+    'FREQ=HOURLY;BYMINUTE=0;UNTIL=20200101T000000Z',
+    'FREQ=DAILY;COUNT=1;BYHOUR=9;BYMINUTE=0',
+    'FREQ=HOURLY;INTERVAL=2;BYMINUTE=0',
+    'FREQ=DAILY;BYMONTH=1;BYHOUR=9;BYMINUTE=0',
+    'FREQ=HOURLY;until=20200101T000000Z;BYMINUTE=0'
+  ])('rejects new RRULE input with a part the scheduler would ignore: %s', (rrule) => {
+    expect(isValidAutomationSchedule(rrule)).toBe(false)
+  })
+
+  it('keeps computing saved RRULE rows that carry an unsupported part', () => {
+    const rrule = 'FREQ=HOURLY;BYMINUTE=0;UNTIL=20200101T000000Z'
+    const start = new Date(2026, 9, 29, 9, 30).getTime()
+
+    expect(isRunnableAutomationSchedule(rrule)).toBe(true)
+    expect(nextAutomationOccurrenceAfter(rrule, start, start)).toBe(
+      new Date(2026, 9, 29, 10, 0).getTime()
+    )
   })
 
   it('formats invalid schedules with a safe fallback label', () => {

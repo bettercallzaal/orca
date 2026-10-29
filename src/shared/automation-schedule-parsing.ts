@@ -32,16 +32,38 @@ export type ParsedCron = {
 
 export type ParsedSchedule = ParsedRrule | ParsedCron
 export type { CronParseOptions }
+export type ScheduleParseOptions = CronParseOptions & {
+  /** Reject new RRULE input with cadence parts the scheduler ignores, but keep computing saved rows. */
+  rejectUnsupportedRrulePart?: boolean
+}
 
 const DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const
 const WEEKDAY_CODES = ['MO', 'TU', 'WE', 'TH', 'FR'] as const
+// Why: RFC 5545 parts that end or change the cadence; ignoring them runs a schedule the user did not write.
+const UNSUPPORTED_RRULE_PARTS = new Set([
+  'UNTIL',
+  'COUNT',
+  'INTERVAL',
+  'BYSECOND',
+  'BYMONTHDAY',
+  'BYYEARDAY',
+  'BYWEEKNO',
+  'BYMONTH',
+  'BYSETPOS'
+])
 
-function parseRrule(rrule: string): ParsedRrule {
+function parseRrule(rrule: string, options: ScheduleParseOptions = {}): ParsedRrule {
   const entries = new Map<string, string>()
   for (const part of rrule.split(';')) {
     const [key, value] = part.split('=')
     if (key && value) {
       entries.set(key.toUpperCase(), value)
+    }
+  }
+  if (options.rejectUnsupportedRrulePart) {
+    const unsupported = [...entries.keys()].find((key) => UNSUPPORTED_RRULE_PARTS.has(key))
+    if (unsupported) {
+      throw new Error(`Unsupported recurrence part: ${unsupported}.`)
     }
   }
   const freq = entries.get('FREQ')
@@ -158,15 +180,18 @@ function isAutomationCronFieldWhitespace(code: number): boolean {
   )
 }
 
-export function parseSchedule(schedule: string, options: CronParseOptions = {}): ParsedSchedule {
+export function parseSchedule(
+  schedule: string,
+  options: ScheduleParseOptions = {}
+): ParsedSchedule {
   const trimmed = schedule.trim()
   if (trimmed.includes('=')) {
-    return parseRrule(trimmed)
+    return parseRrule(trimmed, options)
   }
   return parseCronExpression(trimmed, options)
 }
 
-function scheduleRuns(schedule: string, options: CronParseOptions): boolean {
+function scheduleRuns(schedule: string, options: ScheduleParseOptions): boolean {
   try {
     const parsed = parseSchedule(schedule, options)
     return parsed.kind !== 'cron' || cronHasPossibleOccurrence(parsed, Date.now())
@@ -183,9 +208,9 @@ function cronScheduleRuns(schedule: string, options: CronParseOptions): boolean 
   }
 }
 
-/** Accepts a schedule as new input, oversized-step refusal included (#15895). */
+/** Accepts a schedule as new input, oversized-step and ignored-RRULE-part refusal included (#15895). */
 export function isValidAutomationSchedule(schedule: string): boolean {
-  return scheduleRuns(schedule, { rejectOversizedStep: true })
+  return scheduleRuns(schedule, { rejectOversizedStep: true, rejectUnsupportedRrulePart: true })
 }
 
 export function isValidAutomationCronSchedule(schedule: string): boolean {
